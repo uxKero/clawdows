@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/media/banner.gif" alt="Claude Status Bar for Windows" width="100%">
+<img src="assets/media/clawd-walk.gif" width="170" alt="Clawd the crab walking">
 
 # Claude Status Bar — for Windows
 
@@ -13,9 +13,9 @@
 
 </div>
 
-A tiny system-tray indicator for [Claude Code](https://claude.com/claude-code). Glance at the
-corner and know what Claude is doing — **Clawd walks while it works, stops when it's done**, and a
-subtle toast pings you when a long task finishes. One **~3 MB native `.exe`** — no runtime, no Node.
+A tiny system-tray indicator for [Claude Code](https://claude.com/claude-code). Glance at the corner
+and know what Claude is doing — **Clawd walks while it works, stops when it's done**, and a subtle
+toast pings you when a long task finishes. One **~3 MB native `.exe`** — no runtime, no Node.
 
 ## ✨ Features
 
@@ -27,11 +27,24 @@ subtle toast pings you when a long task finishes. One **~3 MB native `.exe`** �
 - 🌍 **3 languages** — English · Español · 中文 (auto-detected).
 - 🪶 **One self-contained `.exe`** — installs the hooks for you, appears/leaves with your sessions, never starts with Windows.
 
-<div align="center">
-<img src="assets/media/panel-main.png" width="230" alt="Main panel">
-&nbsp;&nbsp;&nbsp;
-<img src="assets/media/panel-notifications.png" width="230" alt="Notifications submenu">
-</div>
+## 👀 What it looks like
+
+<table>
+  <tr>
+    <td align="center" valign="top">
+      <img src="assets/media/panel-main.png" width="230" alt="Main panel"><br>
+      <sub>Left-click Clawd → a Claude-Code-style panel</sub>
+    </td>
+    <td align="center" valign="top">
+      <img src="assets/media/panel-notifications.png" width="230" alt="Notifications submenu"><br>
+      <sub>Notifications, all configurable</sub>
+    </td>
+  </tr>
+</table>
+
+<img src="assets/media/notification.png" width="360" alt="Windows notification">
+
+<sub>A subtle Windows toast when a long task finishes.</sub>
 
 ## 🚀 Install
 
