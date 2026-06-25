@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>            <!-- sin ventana de consola (no parpadea) -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishAot>true</PublishAot>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>  <!-- punteros a funcion para el WndProc -->
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>claude-status-bar</AssemblyName>
+    <Version>0.1.0</Version>
+    <ApplicationIcon>assets\claude.ico</ApplicationIcon>   <!-- icono del .exe = Clawd -->
+    <!-- Nombre lindo en el toast / propiedades del .exe (no el nombre de archivo) -->
+    <AssemblyTitle>Claude Status Bar</AssemblyTitle>
+    <Product>Claude Status Bar</Product>
+    <Company>Cultura Interactiva</Company>
+    <Description>Indicador de estado de Claude Code en la bandeja de Windows (Clawd)</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Frames de Clawd embebidos en el .exe (arte: m1ckc3s/claude-status-bar, MIT) -->
+    <EmbeddedResource Include="..\assets\crab\frame-*.png" />
+    <!-- Traducciones (en / es / zh) -->
+    <EmbeddedResource Include="assets\strings.json" />
+    <!-- Chime sutil al terminar una tarea larga -->
+    <EmbeddedResource Include="assets\chime.wav" />
+  </ItemGroup>
+
+</Project>

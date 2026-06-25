@@ -1,0 +1,15 @@
+# Build output
+bin/
+obj/
+dist/
+*.user
+.vs/
+
+# Throwaway validation prototype (PowerShell + Node) — replaced by the .exe
+prototype/
+
+# Vendored original macOS sources (only the crab PNGs were extracted; see assets/crab/ATTRIBUTION.md)
+vendor/
+
+# Internal planning doc — not part of the public repo
+claude-status-bar.md
