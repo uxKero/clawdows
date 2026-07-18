@@ -21,24 +21,17 @@ One **~3.6 MB native `.exe`** — no runtime, no Node, no Electron.
 
 ## Features
 
-**Respond without leaving your editor.** When Claude needs you, a small Claude-Code-style
-popup appears next to the tray — answer it in a click, or ignore it and the normal terminal
-prompt appears as always. Clawdows never blocks your flow.
+When Claude needs you, a small Claude-Code-style popup appears next to the tray — answer it in a
+click, or ignore it and the normal terminal prompt appears as always. Clawdows never blocks your flow.
 
-- **Permissions** — Allow or Deny a tool call from the popup instead of switching windows to press `y`.
+- **Permission approvals** — Allow or Deny a tool call from the popup instead of switching windows to press `y`.
 - **Plan review** — read Claude's plan rendered with headings, bullets and code, then Approve or Reject.
 - **Questions** — answer an `AskUserQuestion` as buttons, single- or multi-select; your choice goes straight back to Claude.
-
-**Know what's happening at a glance.**
-
 - **Clawd, the tray mascot** — walks while Claude works, rests when it's idle.
 - **Multi-session dashboard** — every active Claude Code session with its project, live state and timer.
 - **Terminal jump** — click a session to raise its window, whatever it runs in (Windows Terminal, VS Code, Cursor, JetBrains…).
 - **Real states** — Editing, Reading, Running, Searching, Browsing, Planning, Sub-agent… recovering cleanly on `Esc`.
 - **Usage on hover** — context %, plus 5h / 7d plan usage (no dollar figures).
-
-**Stays out of the way.**
-
 - **Quiet by default** — an optional gentle chime only when a *long* task finishes, plus an "are you there?" nudge if you step away.
 - **Native and tiny** — one self-contained ~3.6 MB `.exe`: no runtime, no Node, no Electron. Installs its own hooks, comes and goes with your sessions, never launches at startup.
 - **Three languages** — English, Español, 中文, auto-detected.
@@ -51,6 +44,8 @@ prompt appears as always. Clawdows never blocks your flow.
 ## What it looks like
 
 Everything happens in the corner — the popup by the tray, the panel from Clawd.
+
+<div align="center">
 
 <table>
   <tr>
@@ -78,6 +73,8 @@ Everything happens in the corner — the popup by the tray, the panel from Clawd
 <img src="assets/media/notification.png" width="360" alt="Windows notification">
 
 <sub>A subtle Windows toast when a long task finishes.</sub>
+
+</div>
 
 ## 🚀 Install
 
