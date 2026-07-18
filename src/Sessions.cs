@@ -312,11 +312,14 @@ internal static unsafe partial class Program
             }
             if (working) { _awaitingUserSince = 0; _awayPinged = false; }
 
-            // Pregunta nueva (AskUserQuestion): toast + chime, solo display.
+            // Pregunta nueva (AskUserQuestion): toast + chime SOLO cuando no hay popup GUI.
+            // Con GuiQuestions activo el popup ES el aviso (y OnNewRequest ya suena el chime);
+            // la sesion se escribe ANTES que el req del popup, asi que notificar aca se
+            // adelantaria al popup y duplicaria el chime. Sin GUI (popup off) si avisamos.
             if (s.Question is { AskedAt: > 0 } q && q.AskedAt != ns.LastQuestionAt)
             {
                 ns.LastQuestionAt = q.AskedAt;
-                if (_config.NotifyOnQuestion)
+                if (_config.NotifyOnQuestion && !_config.GuiQuestions)
                 {
                     string body = q.Text ?? "";
                     if (body.Length > 180) body = body.Substring(0, 179) + "…";
