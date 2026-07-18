@@ -26,11 +26,11 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: claude-status-bar
-          path: dist/claude-status-bar.exe
+          name: clawdows
+          path: dist/clawdows.exe
 
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/claude-status-bar.exe
+          files: dist/clawdows.exe

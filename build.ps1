@@ -15,4 +15,4 @@ if (-not (Get-Command vswhere.exe -ErrorAction SilentlyContinue)) {
 $proj = Join-Path $PSScriptRoot "src\ClaudeStatusBar.csproj"
 $out  = Join-Path $PSScriptRoot "dist"
 dotnet publish $proj -c Release -o $out
-Write-Host "`nListo -> $out\claude-status-bar.exe"
+Write-Host "`nListo -> $out\clawdows.exe"

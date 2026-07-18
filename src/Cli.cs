@@ -102,6 +102,7 @@ internal static unsafe partial class Program
         if (tool.StartsWith("mcp__", StringComparison.Ordinal)) return "mcp";
         return tool switch
         {
+            "AskUserQuestion" => "question",
             "Edit" or "Write" or "MultiEdit" or "NotebookEdit" => "edit",
             "Read" or "NotebookRead" => "read",
             "Bash" or "BashOutput" or "PowerShell" or "KillShell" => "bash",
@@ -113,25 +114,19 @@ internal static unsafe partial class Program
         };
     }
 
-    static int SessionCount(int delta, string sessionId)
-    {
-        string dir = Path.Combine(_sbDir, "sessions.d");
-        try
-        {
-            Directory.CreateDirectory(dir);
-            if (!string.IsNullOrEmpty(sessionId))
-            {
-                string f = Path.Combine(dir, Sanitize(sessionId));
-                if (delta > 0) File.WriteAllText(f, "");
-                else if (delta < 0 && File.Exists(f)) File.Delete(f);
-            }
-            return Directory.GetFiles(dir).Length;
-        }
-        catch { return 1; }
-    }
-
     static void WriteState(StateJson st) =>
         WriteAtomic(_statePath, JsonSerializer.Serialize(st, JsonCtx.Default.StateJson));
+
+    // state.json mergeado (last-writer-wins): compat con v0.1 y canal del Shutdown.
+    static void WriteMergedState(SessionJson s, bool shutdown) => WriteState(new StateJson
+    {
+        Status = s.Status,
+        LabelKey = s.LabelKey,
+        TurnStartedAt = s.TurnStartedAt,
+        Transcript = s.Transcript ?? "",
+        UpdatedAt = s.UpdatedAt,
+        Shutdown = shutdown,
+    });
 
     static bool TrayRunning()
     {
@@ -175,51 +170,314 @@ internal static unsafe partial class Program
         try { p = JsonSerializer.Deserialize(ReadAllStdin(), JsonCtx.Default.HookInput); } catch { }
         string sid = p?.SessionId ?? Environment.GetEnvironmentVariable("CLAUDE_CODE_SESSION_ID") ?? "";
         long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var prev = ReadState() ?? new StateJson();
+        bool haveSid = sid.Length > 0;
 
-        var st = new StateJson
-        {
-            Status = "idle",
-            LabelKey = "",
-            TurnStartedAt = prev.TurnStartedAt,
-            Transcript = p?.TranscriptPath ?? prev.Transcript ?? "",
-            UpdatedAt = now,
-        };
+        // Estado de ESTA sesion (sessions.d\<sid>.json); el mergeado se escribe igual.
+        var ss = (haveSid ? ReadSession(sid) : null) ?? new SessionJson();
+        ss.SessionId = sid;
+        ss.UpdatedAt = now;
+        if (p?.TranscriptPath is { Length: > 0 } tp) ss.Transcript = tp;
+        if (p?.Cwd is { Length: > 0 } cw) { ss.Cwd = cw; ss.Project = ProjectName(cw); }
 
         switch (ev)
         {
+            case "permission":
+                return PermissionCommand(p); // handshake GUI (no toca ss aca)
             case "sessionstart":
-                SessionCount(+1, sid);
-                st.TurnStartedAt = 0;
-                WriteState(st);
-                EnsureTray();
-                return 0;
+                CleanLegacyMarkers();
+                ss.Status = "idle"; ss.LabelKey = ""; ss.TurnStartedAt = 0;
+                DiscoverTerminal(ss);
+                break;
             case "userpromptsubmit":
-                st.Status = "thinking"; st.LabelKey = "thinking"; st.TurnStartedAt = now; break;
+                ss.Status = "thinking"; ss.LabelKey = "thinking"; ss.TurnStartedAt = now;
+                ss.Question = null;
+                if (ss.TermPid == 0) DiscoverTerminal(ss); // sesion resumida por hooks viejos
+                break;
             case "pretool":
-                st.Status = "tool"; st.LabelKey = LabelKeyForTool(p?.ToolName);
-                if (st.TurnStartedAt == 0) st.TurnStartedAt = now; break;
+                ss.Status = "tool"; ss.LabelKey = LabelKeyForTool(p?.ToolName);
+                if (ss.TurnStartedAt == 0) ss.TurnStartedAt = now;
+                if (p?.ToolName == "AskUserQuestion")
+                {
+                    LoadConfig();
+                    ss.Question = ParseQuestion(p.ToolInput, now);
+                    if (haveSid) WriteSession(ss);
+                    WriteMergedState(ss, false);
+                    return QuestionCommand(p, ss); // bloquea esperando la respuesta del popup
+                }
+                break;
             case "posttool":
-                st.Status = "thinking"; st.LabelKey = "thinking"; break;
+                ss.Status = "thinking"; ss.LabelKey = "thinking";
+                ss.Question = null;
+                break;
             case "notification":
                 {
                     string m = (p?.Message ?? "").ToLowerInvariant();
                     bool perm = m.Contains("permis") || m.Contains("permiso") || m.Contains("approve")
                                 || m.Contains("allow") || m.Contains("grant") || m.Contains("confirm");
-                    if (perm) { st.Status = "awaiting"; st.LabelKey = "awaiting"; }
-                    else { st.TurnStartedAt = 0; }
+                    if (perm) { ss.Status = "awaiting"; ss.LabelKey = "awaiting"; }
+                    else { ss.Status = "idle"; ss.LabelKey = ""; ss.TurnStartedAt = 0; }
                     break;
                 }
             case "stop":
-                st.TurnStartedAt = 0; break;
+                ss.Status = "idle"; ss.LabelKey = ""; ss.TurnStartedAt = 0;
+                ss.Question = null;
+                break;
             case "sessionend":
-                if (SessionCount(-1, sid) <= 0) st.Shutdown = true;
-                st.TurnStartedAt = 0; break;
+                {
+                    if (haveSid) DeleteSession(sid);
+                    ss.Status = "idle"; ss.LabelKey = ""; ss.TurnStartedAt = 0;
+                    WriteMergedState(ss, shutdown: CountSessions() <= 0);
+                    return 0;
+                }
             default:
                 return 0;
         }
-        WriteState(st);
+
+        if (haveSid) WriteSession(ss);
+        WriteMergedState(ss, shutdown: false);
+        if (ev == "sessionstart") EnsureTray();
         return 0;
+    }
+
+    // ================= permission (handshake GUI) =================
+    // El hook PermissionRequest de Claude Code espera nuestro stdout para decidir.
+    // Escribimos un request file, el tray muestra Allow/Deny y deja un decision file.
+    // Sin decision (timeout / tray apagado / passthrough) -> exit 0 sin output y
+    // Claude Code muestra su prompt normal en la terminal. Nunca podemos romper el flujo.
+    static string RequestsDir => Path.Combine(_sbDir, "requests");
+
+    static int PermissionCommand(HookInput? p)
+    {
+        try
+        {
+            if (p == null) return 0;
+            LoadConfig();
+            string tool = p.ToolName ?? "";
+            bool plan = tool == "ExitPlanMode";
+            if (plan ? !_config.GuiPlanReview : !_config.GuiApprovals) return 0;
+            if (!TrayRunning()) return 0;
+
+            string sid = p.SessionId ?? "";
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            int timeoutS = plan
+                ? Math.Clamp(_config.PlanTimeoutSeconds, 30, 570)
+                : Math.Clamp(_config.PermissionTimeoutSeconds, 10, 300);
+
+            var ss = sid.Length > 0 ? ReadSession(sid) : null;
+            var req = new ReqJson
+            {
+                Id = Sanitize(sid) + "-" + now + "-" + Environment.ProcessId,
+                SessionId = sid,
+                Project = p.Cwd is { Length: > 0 } cw ? ProjectName(cw) : ss?.Project,
+                Tool = tool,
+                Kind = plan ? "plan" : "permission",
+                Summary = BuildSummary(tool, p.ToolInput),
+                Plan = plan ? PlanText(p.ToolInput) : null,
+                CreatedAt = now,
+                ExpiresAt = now + timeoutS * 1000L,
+                HookPid = Environment.ProcessId,
+            };
+            string reqPath = Path.Combine(RequestsDir, req.Id + ".req.json");
+            string decPath = Path.Combine(RequestsDir, req.Id + ".decision.json");
+
+            try
+            {
+                // Primero el request (el tray lo ve y muestra el popup), despues la sesion
+                // en "awaiting" — asi el toast fallback ve el pendiente y no duplica aviso.
+                WriteAtomic(reqPath, JsonSerializer.Serialize(req, JsonCtx.Default.ReqJson));
+                if (ss != null)
+                {
+                    ss.Status = "awaiting"; ss.LabelKey = "awaiting"; ss.UpdatedAt = now;
+                    WriteSession(ss); WriteMergedState(ss, false);
+                }
+                while (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < req.ExpiresAt)
+                {
+                    if (File.Exists(decPath))
+                    {
+                        DecisionJson? d = null;
+                        try { d = JsonSerializer.Deserialize(File.ReadAllText(decPath), JsonCtx.Default.DecisionJson); } catch { }
+                        string b = d?.Behavior ?? "";
+                        if (b is "allow" or "deny")
+                            WriteAllStdout("{\"hookSpecificOutput\":{\"hookEventName\":\"PermissionRequest\",\"decision\":{\"behavior\":\"" + b + "\"}}}");
+                        return 0; // passthrough / desconocido -> prompt normal en terminal
+                    }
+                    Thread.Sleep(150);
+                }
+            }
+            finally
+            {
+                // El hook es dueño de sus archivos: los borra en todo camino de salida.
+                try { File.Delete(reqPath); } catch { }
+                try { File.Delete(decPath); } catch { }
+                if (ss != null)
+                {
+                    ss.Status = "tool"; ss.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    WriteSession(ss); WriteMergedState(ss, false);
+                }
+            }
+        }
+        catch { }
+        return 0;
+    }
+
+    // Resumen humano del tool_input para el popup (max ~5 lineas cortas).
+    static string[] BuildSummary(string tool, JsonElement input)
+    {
+        string text = "";
+        try
+        {
+            if (input.ValueKind == JsonValueKind.Object)
+            {
+                string? Get(string n) => input.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+                text = tool switch
+                {
+                    "Bash" or "PowerShell" => Get("command") ?? "",
+                    "Edit" or "Write" or "MultiEdit" or "NotebookEdit" or "Read" => Get("file_path") ?? "",
+                    "WebFetch" => Get("url") ?? "",
+                    "WebSearch" => Get("query") ?? "",
+                    _ => "",
+                } ?? "";
+                if (text.Length == 0)
+                    foreach (var prop in input.EnumerateObject())
+                        if (prop.Value.ValueKind == JsonValueKind.String && prop.Value.GetString() is { Length: > 0 } sv)
+                        { text = sv; break; }
+                if (text.Length == 0) text = input.GetRawText();
+            }
+            else if (input.ValueKind != JsonValueKind.Undefined) text = input.GetRawText();
+        }
+        catch { }
+
+        text = text.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
+        if (text.Length > 200) text = text.Substring(0, 199) + "…";
+
+        // Cortar en lineas de ~44 chars (ancho del popup) — max 5.
+        var lines = new List<string>();
+        for (int i = 0; i < text.Length && lines.Count < 5; i += 44)
+            lines.Add(text.Substring(i, Math.Min(44, text.Length - i)));
+        if (lines.Count == 0) lines.Add("");
+        return lines.ToArray();
+    }
+
+    // AskUserQuestion: todas las preguntas (max 4) con sus opciones (max 4 c/u).
+    static QuestionJson[] ParseQuestions(JsonElement input, long now)
+    {
+        var list = new List<QuestionJson>();
+        try
+        {
+            if (input.ValueKind != JsonValueKind.Object
+                || !input.TryGetProperty("questions", out var qs) || qs.ValueKind != JsonValueKind.Array) return list.ToArray();
+            foreach (var q in qs.EnumerateArray())
+            {
+                if (q.ValueKind != JsonValueKind.Object) continue;
+                string? text = q.TryGetProperty("question", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+                if (string.IsNullOrEmpty(text)) continue;
+                var opts = new List<string>();
+                if (q.TryGetProperty("options", out var os) && os.ValueKind == JsonValueKind.Array)
+                    foreach (var o in os.EnumerateArray())
+                    {
+                        if (o.ValueKind == JsonValueKind.String) opts.Add(o.GetString() ?? "");
+                        else if (o.ValueKind == JsonValueKind.Object && o.TryGetProperty("label", out var l)
+                                 && l.ValueKind == JsonValueKind.String) opts.Add(l.GetString() ?? "");
+                        if (opts.Count >= 4) break;
+                    }
+                bool multi = q.TryGetProperty("multiSelect", out var ms) && ms.ValueKind == JsonValueKind.True;
+                list.Add(new QuestionJson { Text = text, Options = opts.ToArray(), MultiSelect = multi, AskedAt = now });
+                if (list.Count >= 4) break;
+            }
+        }
+        catch { }
+        return list.ToArray();
+    }
+
+    static QuestionJson? ParseQuestion(JsonElement input, long now)
+    {
+        var all = ParseQuestions(input, now);
+        return all.Length > 0 ? all[0] : null;
+    }
+
+    // Handshake de preguntas: el popup muestra la pregunta y las opciones; al elegir,
+    // PreToolUse DENIEGA el AskUserQuestion con la respuesta como motivo -> Claude la
+    // recibe como feedback y continua sin re-preguntar. Sin respuesta -> terminal.
+    static int QuestionCommand(HookInput p, SessionJson? ss)
+    {
+        try
+        {
+            if (!_config.GuiQuestions || !TrayRunning()) return 0;
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var questions = ParseQuestions(p.ToolInput, now);
+            if (questions.Length == 0) return 0;
+
+            string sid = p.SessionId ?? "";
+            int timeoutS = Math.Clamp(_config.QuestionTimeoutSeconds, 10, 570);
+            var req = new ReqJson
+            {
+                Id = Sanitize(sid) + "-" + now + "-" + Environment.ProcessId,
+                SessionId = sid,
+                Project = p.Cwd is { Length: > 0 } cw ? ProjectName(cw) : ss?.Project,
+                Tool = "AskUserQuestion",
+                Kind = "question",
+                Summary = BuildSummary("AskUserQuestion", p.ToolInput),
+                Questions = questions,
+                CreatedAt = now,
+                ExpiresAt = now + timeoutS * 1000L,
+                HookPid = Environment.ProcessId,
+            };
+            string reqPath = Path.Combine(RequestsDir, req.Id + ".req.json");
+            string decPath = Path.Combine(RequestsDir, req.Id + ".decision.json");
+            bool answered = false;
+            try
+            {
+                WriteAtomic(reqPath, JsonSerializer.Serialize(req, JsonCtx.Default.ReqJson));
+                while (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < req.ExpiresAt)
+                {
+                    if (File.Exists(decPath))
+                    {
+                        DecisionJson? d = null;
+                        try { d = JsonSerializer.Deserialize(File.ReadAllText(decPath), JsonCtx.Default.DecisionJson); } catch { }
+                        if (d?.Behavior == "answer" && d.Answers is { Length: > 0 } ans)
+                        {
+                            answered = true;
+                            var sb = new StringBuilder();
+                            sb.Append("The user already answered THIS question set via the Claude Status Bar popup (GUI). ");
+                            for (int i = 0; i < ans.Length && i < questions.Length; i++)
+                                sb.Append("Question: \"").Append(questions[i].Text).Append("\" -> Answer: \"").Append(ans[i]).Append("\". ");
+                            sb.Append("Treat these as the user's real answers and continue; do not repeat these exact questions. ");
+                            sb.Append("You may still use AskUserQuestion later for any NEW questions.");
+                            string reason = JsonSerializer.Serialize(sb.ToString(), JsonCtx.Default.String);
+                            WriteAllStdout("{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":" + reason + "}}");
+                        }
+                        return 0; // passthrough / desconocido -> pregunta normal en terminal
+                    }
+                    Thread.Sleep(150);
+                }
+            }
+            finally
+            {
+                try { File.Delete(reqPath); } catch { }
+                try { File.Delete(decPath); } catch { }
+                if (answered && ss != null)
+                {
+                    ss.Question = null; ss.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    WriteSession(ss); // ya respondida: que no quede colgada en el panel
+                }
+            }
+        }
+        catch { }
+        return 0;
+    }
+
+    static string? PlanText(JsonElement input)
+    {
+        try
+        {
+            if (input.ValueKind == JsonValueKind.Object)
+            {
+                if (input.TryGetProperty("plan", out var v) && v.ValueKind == JsonValueKind.String) return v.GetString();
+                return input.GetRawText();
+            }
+        }
+        catch { }
+        return null;
     }
 
     // ================= statusline =================
@@ -297,19 +555,23 @@ internal static unsafe partial class Program
     static string Stamp() => DateTime.Now.ToString("yyyy-MM-dd-HH-mm-ss");
     static readonly JsonSerializerOptions PrettyJson = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    static readonly (string evt, string arg)[] HookMap =
+    static readonly (string evt, string arg, string? matcher, int timeout)[] HookMap =
     {
-        ("SessionStart", "sessionstart"), ("UserPromptSubmit", "userpromptsubmit"),
-        ("PreToolUse", "pretool"), ("PostToolUse", "posttool"),
-        ("Notification", "notification"), ("Stop", "stop"), ("SessionEnd", "sessionend"),
+        ("SessionStart", "sessionstart", null, 0), ("UserPromptSubmit", "userpromptsubmit", null, 0),
+        ("PreToolUse", "pretool", "*", 0), ("PostToolUse", "posttool", "*", 0),
+        ("Notification", "notification", null, 0), ("Stop", "stop", null, 0), ("SessionEnd", "sessionend", null, 0),
+        // timeout largo: el subcomando corta solo antes (PermissionTimeoutSeconds / PlanTimeoutSeconds)
+        ("PermissionRequest", "permission", "*", 600),
     };
 
     static bool IsOurs(JsonNode? n, string exe)
     {
         if (n is not JsonObject o || o["hooks"] is not JsonArray hs) return false;
         foreach (var h in hs)
-            if (h?["command"]?.GetValue<string>() is string c
-                && c.Contains(exe, StringComparison.OrdinalIgnoreCase) && c.Contains(" hook"))
+            if (h?["command"]?.GetValue<string>() is string c && c.Contains(" hook")
+                && (c.Contains(exe, StringComparison.OrdinalIgnoreCase)
+                    || c.Contains("clawdows", StringComparison.OrdinalIgnoreCase)
+                    || c.Contains("claude-status-bar", StringComparison.OrdinalIgnoreCase))) // migracion del nombre viejo
                 return true;
         return false;
     }
@@ -319,7 +581,7 @@ internal static unsafe partial class Program
         string exe = ExePath();
         foreach (var dir in ConfigDirArgs(args)) InstallInto(dir, exe);
         EnsureTray();
-        WriteAllStdout("Claude Status Bar instalado. Abri una ventana NUEVA de Claude Code.\r\n");
+        WriteAllStdout("Clawdows instalado. Abri una ventana NUEVA de Claude Code.\r\n");
         return 0;
     }
 
@@ -336,15 +598,16 @@ internal static unsafe partial class Program
 
         var hooks = root["hooks"] as JsonObject ?? new JsonObject();
         root["hooks"] = hooks;
-        foreach (var (evt, arg) in HookMap)
+        foreach (var (evt, arg, matcher, timeout) in HookMap)
         {
             var arr = hooks[evt] as JsonArray ?? new JsonArray();
             for (int i = arr.Count - 1; i >= 0; i--) if (IsOurs(arr[i], exe)) arr.RemoveAt(i);
             var hk = new JsonObject(); hk["type"] = "command"; hk["command"] = "\"" + exe + "\" hook " + arg;
+            if (timeout > 0) hk["timeout"] = timeout;
             var hkArr = new JsonArray();
             ((IList<JsonNode?>)hkArr).Add(hk);
             var entry = new JsonObject(); entry["hooks"] = hkArr;
-            if (evt == "PreToolUse" || evt == "PostToolUse") entry["matcher"] = "*";
+            if (matcher != null) entry["matcher"] = matcher;
             ((IList<JsonNode?>)arr).Add(entry);
             hooks[evt] = arr;
         }
@@ -367,7 +630,7 @@ internal static unsafe partial class Program
     {
         string exe = ExePath();
         foreach (var dir in ConfigDirArgs(args)) UninstallFrom(dir, exe);
-        WriteAllStdout("Claude Status Bar desinstalado.\r\n");
+        WriteAllStdout("Clawdows desinstalado.\r\n");
         return 0;
     }
 
@@ -415,6 +678,29 @@ internal static unsafe partial class Program
         [JsonPropertyName("transcript_path")] public string? TranscriptPath { get; set; }
         [JsonPropertyName("cwd")] public string? Cwd { get; set; }
         [JsonPropertyName("message")] public string? Message { get; set; }
+        [JsonPropertyName("tool_input")] public JsonElement ToolInput { get; set; }
+    }
+
+    // Request de aprobacion pendiente (requests\<id>.req.json) y su decision.
+    class ReqJson
+    {
+        public string? Id { get; set; }
+        public string? SessionId { get; set; }
+        public string? Project { get; set; }
+        public string? Tool { get; set; }
+        public string? Kind { get; set; }   // permission | plan | question
+        public string[]? Summary { get; set; }
+        public string? Plan { get; set; }
+        public QuestionJson[]? Questions { get; set; }
+        public long CreatedAt { get; set; }
+        public long ExpiresAt { get; set; }
+        public int HookPid { get; set; }
+    }
+    class DecisionJson
+    {
+        public string? Behavior { get; set; } // allow | deny | passthrough | answer
+        public string[]? Answers { get; set; } // para behavior=answer (una por pregunta)
+        public long DecidedAt { get; set; }
     }
     class StatuslineInput
     {

@@ -8,19 +8,22 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>  <!-- punteros a funcion para el WndProc -->
     <Nullable>enable</Nullable>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <AssemblyName>claude-status-bar</AssemblyName>
-    <Version>0.1.0</Version>
+    <AssemblyName>clawdows</AssemblyName>
+    <Version>1.0.0</Version>
     <ApplicationIcon>assets\claude.ico</ApplicationIcon>   <!-- icono del .exe = Clawd -->
     <!-- Nombre lindo en el toast / propiedades del .exe (no el nombre de archivo) -->
-    <AssemblyTitle>Claude Status Bar</AssemblyTitle>
-    <Product>Claude Status Bar</Product>
-    <Company>Cultura Interactiva</Company>
-    <Description>Indicador de estado de Claude Code en la bandeja de Windows (Clawd)</Description>
+    <AssemblyTitle>Clawdows</AssemblyTitle>
+    <Product>Clawdows</Product>
+    <Company>uxKero</Company>
+    <Description>Clawdows - el companion de Claude Code para Windows: permisos, planes y preguntas desde la bandeja (Clawd)</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- Frames de Clawd embebidos en el .exe (arte: m1ckc3s/claude-status-bar, MIT) -->
     <EmbeddedResource Include="..\assets\crab\frame-*.png" />
+    <!-- Clawds animados por contexto (permisos / plan / preguntas / estados del panel) -->
+    <EmbeddedResource Include="..\assets\clawdes\*.gif" />
+    <EmbeddedResource Include="..\assets\clawdes\*.jpg" />
     <!-- Traducciones (en / es / zh) -->
     <EmbeddedResource Include="assets\strings.json" />
     <!-- Chime sutil al terminar una tarea larga -->

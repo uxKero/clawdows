@@ -50,7 +50,6 @@ internal static unsafe partial class Program
     static string _statePath = "", _configPath = "", _usagePath = "";
     static int _frameIdx;
     static int _tickN;
-    static bool _interrupted;
     static string _lastTip = "";
     static StateJson _state = new();
 
@@ -60,9 +59,6 @@ internal static unsafe partial class Program
     static ConfigJson _config = new();
 
     // --- notificaciones ---
-    static bool _prevWorking;
-    static string _prevStatus = "idle";
-    static long _lastTurnStart;
     static long _awaitingUserSince;
     static bool _awayPinged;
     static nint _chimePtr;
@@ -97,6 +93,8 @@ internal static unsafe partial class Program
 
         LoadStrings();
         LoadConfig();
+        CleanLegacyMarkers(); // migracion v0.1: markers de sesion sin extension
+        SweepRequests();      // requests huerfanos de corridas anteriores
 
         nint hInstance = GetModuleHandleW(null);
         fixed (char* clsName = "ClaudeStatusBarWndClass")
@@ -116,6 +114,7 @@ internal static unsafe partial class Program
 
         GdiPlusStartup();
         _frames = LoadCrabFrames();
+        LoadAnims(); // Clawds por contexto (popup permisos/plan/preguntas + header)
         LoadChime();
         nint icon = _frames.Length > 0 ? _frames[0] : LoadIconW(0, IDI_APPLICATION);
 
@@ -134,7 +133,8 @@ internal static unsafe partial class Program
         _nid.uVersion = NOTIFYICON_VERSION_4;
         Shell_NotifyIconW(NIM_SETVERSION, ref _nid);
 
-        RegisterPanel(hInstance); // panel oscuro estilo Claude Code
+        RegisterPanel(hInstance);   // panel oscuro estilo Claude Code
+        RegisterApprove(hInstance); // popup de aprobacion (Allow/Deny)
         if (_debugKeepOpen)
         {
             ShowPanel(); // modo debug: mostrar el panel al arrancar
@@ -183,71 +183,41 @@ internal static unsafe partial class Program
         return DefWindowProcW(hWnd, msg, wParam, lParam);
     }
 
-    // ---------------- Logica de estado (rebanada 3) ----------------
+    // ---------------- Logica de estado (rebanada 3 + multi-sesion) ----------------
     static void Tick()
     {
         _tickN++;
+        // state.json mergeado: canal del Shutdown + fallback cuando no hay sesiones.
         var st = ReadState();
         if (st != null) _state = st;
         st = _state;
 
         if (st.Shutdown) { DestroyWindow(_hwnd); return; }
 
-        bool working = st.Status == "thinking" || st.Status == "tool";
+        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (_tickN % 4 == 0) RefreshSessions();
+        if (_tickN % 3 == 0) ScanRequests(now);
+        if (_tickN % 64 == 0) PruneDeadSessions(now);
 
-        // Interrupcion (Esc / permiso negado): el hook Stop no dispara.
-        if (working)
-        {
-            if (_tickN % 6 == 0) _interrupted = TestInterrupted(st);
-            if (_interrupted) working = false;
-        }
-        else _interrupted = false;
+        // Recorre sesiones (notificaciones incluidas) y agrega para icono/tooltip.
+        var a = Aggregate(now);
 
-        // ---- Notificaciones (estado real) ----
         if (_testNotif) { _testNotif = false; ShowNotif(T("n_done_title"), T("n_done_body").Replace("{0}", "2m 10s")); PlayChime(); }
 
-        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        if (working && st.TurnStartedAt > 0) _lastTurnStart = st.TurnStartedAt;
-
-        if (_prevWorking && !working) // termino un turno
-        {
-            bool longTurn = _lastTurnStart > 0 && (now - _lastTurnStart) / 1000 >= _config.CompleteMinSeconds;
-            if (longTurn && _config.NotifyOnComplete)
-                ShowNotif(T("n_done_title"), T("n_done_body").Replace("{0}", FormatElapsed(_lastTurnStart)));
-            if (longTurn && _config.Sound) PlayChime(); // sonido independiente del toast
-            _awaitingUserSince = now; _awayPinged = false; _lastTurnStart = 0;
-        }
-        if (working) { _awaitingUserSince = 0; _awayPinged = false; }
-
-        if (!working && st.Status == "idle" && _config.NotifyAway && _awaitingUserSince > 0 && !_awayPinged
+        if (!a.AnyWorking && a.AllIdle && _config.NotifyAway && _awaitingUserSince > 0 && !_awayPinged
             && (now - _awaitingUserSince) / 1000 >= _config.AwayAfterSeconds)
         {
             ShowNotif(T("n_away_title"), T("n_away_body"));
             _awayPinged = true;
         }
 
-        if (st.Status == "awaiting" && _prevStatus != "awaiting" && _config.NotifyOnPermission)
-            ShowNotif(T("n_perm_title"), T("n_perm_body"));
+        // Animacion: caminar si CUALQUIER sesion trabaja, frame 0 en reposo.
+        _frameIdx = a.AnyWorking && _frames.Length > 0 ? (_frameIdx + 1) % _frames.Length : 0;
 
-        _prevWorking = working;
-        _prevStatus = st.Status;
-
-        // Animacion: caminar al trabajar, frame 0 en reposo.
-        _frameIdx = working && _frames.Length > 0 ? (_frameIdx + 1) % _frames.Length : 0;
-
-        // Tooltip: "Claude - <accion> [- <cronometro>]" + linea de uso.
-        string action = st.Status switch
+        string tip = "Claude - " + a.Tip;
+        if (_config.ShowTimer && a.TimerStart > 0 && a.AnyWorking)
         {
-            "awaiting" => T("awaiting"),
-            "thinking" or "tool" => T(string.IsNullOrEmpty(st.LabelKey) ? "tool" : st.LabelKey!),
-            _ => T("idle"),
-        };
-        if (_interrupted) action = T("idle");
-
-        string tip = "Claude - " + action;
-        if (_config.ShowTimer && st.TurnStartedAt > 0 && working)
-        {
-            string el = FormatElapsed(st.TurnStartedAt);
+            string el = FormatElapsed(a.TimerStart);
             if (el.Length > 0) tip += " - " + el;
         }
         if (_config.ShowUsage)
@@ -266,7 +236,8 @@ internal static unsafe partial class Program
         }
         Shell_NotifyIconW(NIM_MODIFY, ref _nid);
 
-        if (_panelVisible) InvalidateRect(_panelHwnd, 0, 0); // refrescar estado/cronometro en vivo
+        RefreshPanelIfNeeded(); // refrescar estado/cronometro/sesiones en vivo
+        if (_apprVisible) InvalidateRect(_apprHwnd, 0, 0); // countdown del popup
     }
 
     static StateJson? ReadState()
@@ -279,14 +250,14 @@ internal static unsafe partial class Program
         catch { return null; }
     }
 
-    static bool TestInterrupted(StateJson st)
+    static bool TestInterrupted(long updatedAt, string? transcript)
     {
-        if (st.UpdatedAt > 0 &&
-            (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - st.UpdatedAt) / 1000 > 900) return true;
-        if (string.IsNullOrEmpty(st.Transcript) || !File.Exists(st.Transcript)) return false;
+        if (updatedAt > 0 &&
+            (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - updatedAt) / 1000 > 900) return true;
+        if (string.IsNullOrEmpty(transcript) || !File.Exists(transcript)) return false;
         try
         {
-            using var fs = new FileStream(st.Transcript!, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var fs = new FileStream(transcript!, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             int take = (int)Math.Min(8192, fs.Length);
             if (take <= 0) return false;
             fs.Seek(-take, SeekOrigin.End);
@@ -376,6 +347,29 @@ internal static unsafe partial class Program
         if (_strings.TryGetValue(_lang, out var tbl) && tbl.TryGetValue(key, out var v)) return v;
         if (_strings.TryGetValue("en", out var en) && en.TryGetValue(key, out var ve)) return ve;
         return key;
+    }
+
+    // T con idioma explicito: el popup de preguntas/plan habla el idioma DEL contenido
+    // que escribio Claude, no el de la UI (pedido del usuario).
+    static string TL(string lang, string key)
+    {
+        if (_strings.TryGetValue(lang, out var tbl) && tbl.TryGetValue(key, out var v)) return v;
+        return T(key);
+    }
+
+    static readonly char[] EsChars = { '¿', '¡', 'á', 'é', 'í', 'ó', 'ú', 'ñ', 'Á', 'É', 'Í', 'Ó', 'Ú', 'Ñ' };
+    static readonly string[] EsWords = { " el ", " la ", " los ", " las ", " qué ", " que ", " para ", " con ", " una ", " cómo ", " este ", " esta " };
+
+    static string DetectLang(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return _lang;
+        foreach (char c in s)
+            if ((c >= 0x4E00 && c <= 0x9FFF) || (c >= 0x3040 && c <= 0x30FF)) return "zh";
+        if (s.IndexOfAny(EsChars) >= 0) return "es";
+        string low = " " + s.ToLowerInvariant() + " ";
+        int hits = 0;
+        foreach (var w in EsWords) if (low.Contains(w)) hits++;
+        return hits >= 2 ? "es" : "en";
     }
 
     // ---------------- Menu (funcional; panel estilo Claude Code = pulido visual posterior) ----------------
@@ -480,6 +474,9 @@ internal static unsafe partial class Program
 
     static void ShowNotif(string title, string body)
     {
+        // Prioridad del popup de aprobacion: mientras este visible (o haya requests
+        // pendientes) no se muestra NINGUN toast — taparia los botones Allow/Deny.
+        if (_apprVisible || _pendingReqs.Count > 0) return;
         fixed (NOTIFYICONDATAW* pn = &_nid)
         {
             SetStr(pn->szInfoTitle, title, 63);
@@ -561,6 +558,14 @@ internal static unsafe partial class Program
         public int AwayAfterSeconds { get; set; } = 120;
         public bool NotifyOnPermission { get; set; } = true;
         public bool Sound { get; set; } = true;
+        // v0.2: aprobaciones GUI
+        public bool GuiApprovals { get; set; } = true;
+        public bool GuiPlanReview { get; set; } = true;
+        public int PermissionTimeoutSeconds { get; set; } = 60;   // 10..300
+        public int PlanTimeoutSeconds { get; set; } = 300;        // 30..570
+        public bool NotifyOnQuestion { get; set; } = true;
+        public bool GuiQuestions { get; set; } = true;            // responder AskUserQuestion desde popup
+        public int QuestionTimeoutSeconds { get; set; } = 120;    // 10..570
     }
     class UsageJson
     {
@@ -571,9 +576,14 @@ internal static unsafe partial class Program
 
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true)]
     [JsonSerializable(typeof(StateJson))]
+    [JsonSerializable(typeof(SessionJson))]
+    [JsonSerializable(typeof(ReqJson))]
+    [JsonSerializable(typeof(DecisionJson))]
     [JsonSerializable(typeof(ConfigJson))]
     [JsonSerializable(typeof(UsageJson))]
     [JsonSerializable(typeof(HookInput))]
+    [JsonSerializable(typeof(JsonElement))]
+    [JsonSerializable(typeof(string))]
     [JsonSerializable(typeof(StatuslineInput))]
     [JsonSerializable(typeof(Dictionary<string, Dictionary<string, string>>))]
     partial class JsonCtx : JsonSerializerContext { }
