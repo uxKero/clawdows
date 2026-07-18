@@ -1,15 +1,15 @@
 <div align="center">
 
-<img src="assets/media/clawd-walk.gif" width="170" alt="Clawd the crab walking">
+<img src="assets/clawdes/clawdetime.gif" width="200" alt="Clawd the crab checking the time">
 
 # Clawdows
 
 **Claude Code, at home on Windows. Clawd 🦀 walks while Claude works — and you approve, review and answer right from the tray.**
 
-[![Built for Claude Code](https://img.shields.io/badge/Built%20for-Claude%20Code-D97757?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
-[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?logo=windows11&logoColor=white)](#-install)
-[![Native AOT](https://img.shields.io/badge/.NET-Native%20AOT%20·%20~3MB-512BD4?logo=dotnet&logoColor=white)](#-build-from-source)
-[![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f.svg)](LICENSE)
+[![Built for Claude Code](https://img.shields.io/badge/Built%20for-Claude%20Code-555?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-555?logo=windows11&logoColor=white)](#-install)
+[![Native AOT](https://img.shields.io/badge/.NET-Native%20AOT%20·%20~3MB-555?logo=dotnet&logoColor=white)](#-build-from-source)
+[![License: MIT](https://img.shields.io/badge/License-MIT-555.svg)](LICENSE)
 
 </div>
 
@@ -19,37 +19,58 @@
 a small popup appears next to the tray so you can respond **without switching windows**.
 One **~3.6 MB native `.exe`** — no runtime, no Node, no Electron.
 
-## ✨ Features
+## Features
 
-- 🦀 **Clawd, the tray mascot** — walks while Claude is thinking / using tools, idle otherwise.
-- 🛂 **Approve permissions from a popup** *(v1.0)* — when Claude asks for permission, a small Claude-Code-style window appears next to the tray with **Allow / Deny / Answer in terminal**. No more switching windows to press `y`.
-- 📋 **Plan review** *(v1.0)* — when Claude finishes a plan, a scrollable window renders it (headings, bullets, code) with **Approve / Reject** buttons.
-- 🗂 **Multi-session dashboard** *(v1.0)* — the panel lists every active Claude Code session with project, state and timer.
-- ↗️ **Terminal jump** *(v1.0)* — click a session to bring its terminal (or IDE — Windows Terminal, VS Code, Cursor, JetBrains…) to the front.
-- ❓ **Answer questions from the popup** *(v1.0)* — when Claude asks you something (AskUserQuestion), the options appear as buttons next to the tray — including **multi-select** with checkboxes. Your choice goes back to Claude as feedback and it continues; ignore the popup and the question shows in the terminal as usual.
-- 🎯 **Real states** — Editing · Reading · Running a command · Searching · Browsing · Planning · Sub-agent… and recovers correctly on `Esc`.
-- 🔔 **Notifications** — silent by default + an optional gentle **chime** only when a *long* task finishes; plus an "are you there?" ping if you walk away.
-- 📊 **Usage on hover** — context %, and your 5h / 7d plan usage (no dollar amounts).
-- 🎨 **A panel that looks like Claude Code** — dark, rounded, orange accents.
-- 🌍 **3 languages** — English · Español · 中文 (auto-detected).
-- 🪶 **One self-contained `.exe`** — installs the hooks for you, appears/leaves with your sessions, never starts with Windows.
+**Respond without leaving your editor.** When Claude needs you, a small Claude-Code-style
+popup appears next to the tray — answer it in a click, or ignore it and the normal terminal
+prompt appears as always. Clawdows never blocks your flow.
+
+- **Permissions** — Allow or Deny a tool call from the popup instead of switching windows to press `y`.
+- **Plan review** — read Claude's plan rendered with headings, bullets and code, then Approve or Reject.
+- **Questions** — answer an `AskUserQuestion` as buttons, single- or multi-select; your choice goes straight back to Claude.
+
+**Know what's happening at a glance.**
+
+- **Clawd, the tray mascot** — walks while Claude works, rests when it's idle.
+- **Multi-session dashboard** — every active Claude Code session with its project, live state and timer.
+- **Terminal jump** — click a session to raise its window, whatever it runs in (Windows Terminal, VS Code, Cursor, JetBrains…).
+- **Real states** — Editing, Reading, Running, Searching, Browsing, Planning, Sub-agent… recovering cleanly on `Esc`.
+- **Usage on hover** — context %, plus 5h / 7d plan usage (no dollar figures).
+
+**Stays out of the way.**
+
+- **Quiet by default** — an optional gentle chime only when a *long* task finishes, plus an "are you there?" nudge if you step away.
+- **Native and tiny** — one self-contained ~3.6 MB `.exe`: no runtime, no Node, no Electron. Installs its own hooks, comes and goes with your sessions, never launches at startup.
+- **Three languages** — English, Español, 中文, auto-detected.
 
 > **How can it approve permissions?** Claude Code's `PermissionRequest` hook lets an external
 > process decide a permission dialog. The popup writes the decision, the hook passes it back —
 > no keystroke injection, no window tricks. If the tray isn't running (or you ignore the popup),
 > the normal terminal prompt appears as always.
 
-## 👀 What it looks like
+## What it looks like
+
+Everything happens in the corner — the popup by the tray, the panel from Clawd.
 
 <table>
   <tr>
+    <td align="center" valign="top" width="50%">
+      <img src="assets/media/popup-permission.png" width="300" alt="Permission popup"><br>
+      <sub><b>Permissions</b> — Allow / Deny, right by the tray</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <img src="assets/media/popup-question.png" width="300" alt="Question popup"><br>
+      <sub><b>Questions</b> — answer as buttons, multi-select too</sub>
+    </td>
+  </tr>
+  <tr>
     <td align="center" valign="top">
-      <img src="assets/media/panel-main.png" width="230" alt="Main panel"><br>
-      <sub>Left-click Clawd → a Claude-Code-style panel</sub>
+      <img src="assets/media/panel-dashboard.png" width="240" alt="Multi-session dashboard"><br>
+      <sub><b>Dashboard</b> — every session, state and timer</sub>
     </td>
     <td align="center" valign="top">
-      <img src="assets/media/panel-notifications.png" width="230" alt="Notifications submenu"><br>
-      <sub>Notifications, all configurable</sub>
+      <img src="assets/media/popup-plan.png" width="300" alt="Plan review"><br>
+      <sub><b>Plan review</b> — rendered, with Approve / Reject</sub>
     </td>
   </tr>
 </table>
