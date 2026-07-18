@@ -4,20 +4,18 @@
 
 # Clawdows
 
-**Claude Code, at home on Windows. Clawd 🦀 walks while Claude works — and you approve, review and answer right from the tray.**
+**Approve, review and answer Claude Code — right from your Windows tray.**
 
-[![Built for Claude Code](https://img.shields.io/badge/Built%20for-Claude%20Code-555?logo=anthropic&logoColor=white)](https://claude.com/claude-code)
-[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-555?logo=windows11&logoColor=white)](#-install)
-[![Native AOT](https://img.shields.io/badge/.NET-Native%20AOT%20·%20~3MB-555?logo=dotnet&logoColor=white)](#-build-from-source)
-[![License: MIT](https://img.shields.io/badge/License-MIT-555.svg)](LICENSE)
+[![Built for Claude Code](https://img.shields.io/badge/Built%20for-Claude%20Code-000000?style=flat-square&labelColor=000000&logo=anthropic&logoColor=white)](https://claude.com/claude-code)
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-000000?style=flat-square&labelColor=000000&logo=windows11&logoColor=white)](#-install)
+[![Native AOT](https://img.shields.io/badge/.NET-Native%20AOT%20·%20~3MB-000000?style=flat-square&labelColor=000000&logo=dotnet&logoColor=white)](#-build-from-source)
+[![License: MIT](https://img.shields.io/badge/License-MIT-000000?style=flat-square&labelColor=000000)](LICENSE)
 
 </div>
 
-**Clawdows** (formerly *Claude Status Bar for Windows*) is a tiny native companion for
-[Claude Code](https://claude.com/claude-code). Glance at the corner and know what Claude is doing —
-**Clawd walks while it works** — and when Claude needs *you* (a permission, a plan, a question),
-a small popup appears next to the tray so you can respond **without switching windows**.
-One **~3.6 MB native `.exe`** — no runtime, no Node, no Electron.
+**Clawdows** is a tiny native companion for [Claude Code](https://claude.com/claude-code) on Windows.
+Clawd walks in your tray while Claude works — and when it needs a permission, a plan or an answer,
+a popup lets you respond without leaving your editor. One self-contained **~3.6 MB `.exe`**.
 
 ## Features
 
